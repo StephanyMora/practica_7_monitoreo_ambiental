@@ -5,8 +5,6 @@
 #fuses NOPBADEN, NOMCLR, STVREN, NOLVP, NODEBUG
 #use delay(clock=16000000)
 
-
-
 #define LCD_RS_PIN      PIN_D0                                   
 #define LCD_RW_PIN      PIN_D1   
 #define LCD_ENABLE_PIN  PIN_D2 
@@ -22,8 +20,9 @@
 #define ATRAS PIN_B7
 #define testigoTemperatura PIN_B0
 #define testigoHumedad PIN_B1
-#define testigoButano PIN_B2
-#define testigoHidrogeno PIN_B3
+#define testigoHidrogeno PIN_B2
+#define testigoButano PIN_B3
+
 #BIT datoDHT = 0xF82.4             
 #BIT trisDHT = 0xF94.4  
 #define TX_232        PIN_C6
@@ -51,35 +50,35 @@ void conexionDHT();
 short conexionOK();
 unsigned int leerDHT();
 void mostrarDHT();
-void mostrarGases();
 void menuSerial();
 void refreshSerial_LCD();
 void saludoSerial();
+void mostrarGases();
 
-int banderaMenu = 0, banderaCambioEstado = 0;
+
+int banderaMenu = 0, banderaCambioEstado = 0, banderaHidrogeno = 0, banderaButano = 0;
 int apuntador = 1, apuntadorMenuConf = 1, apuntadorMenuAlarmas = 1;
-int contadorAdelante = 0;
+int contadorAdelante = 0, leerADC_ok = 0x00;
 int enteroTemperatura = 0, decimalTemperatura = 0, enteroRH = 0, decimalRH = 0, checksum = 0;
-int leerADC_ok = 0, banderaButano = 0, banderaHidrogeno = 0;
-int16 leerADC = 0, ppmHidrogeno = 0, ppmButano = 0, temperatura = 0, humedad = 0;
+int16 ppmHidrogeno = 0, ppmButano = 0, temperatura = 0, humedad = 0, leerADC = 0;
 int16 initSerial = 300, aux = 0, initLCD = 10, refreshSerial = 0, refreshLCD = 0;
-int16 initTemperatura = 40, initHumedad = 45, initHidrogeno = 500, initButano = 500;
+int16 initTemperatura = 30, initHumedad = 35, initHidrogeno = 500, initButano = 500;
 
 
-#int_timer0
-void isr_timer0(void){
+#INT_TIMER0
+void isr_timer0(){
     refreshSerial++;
     refreshLCD++;
 }
 
 #int_ad
-void isr_adc(void){
+void isr_adc(){
     leerADC = read_adc(ADC_READ_ONLY);
     leerADC_ok = 1;
 }
 
-#int_RB
-void isr_RB(void){
+#INT_RB
+void isr_RB(){
    if(input(ARRIBA) == 1){
       banderaMenu = 1;  
    }
@@ -98,16 +97,19 @@ void isr_RB(void){
 void main(){
    setup_oscillator(OSC_16MHZ);
    setup_adc(ADC_CLOCK_INTERNAL);
-   enable_interrupts(INT_RB);
+   setup_adc_ports(AN0_TO_AN1);
    setup_timer_0(RTCC_INTERNAL|RTCC_DIV_128|RTCC_8_BIT);
    enable_interrupts(INT_TIMER0);
    enable_interrupts(INT_AD);
-   setup_adc_ports(AN0_TO_AN1);
+   enable_interrupts(INT_RB);
    enable_interrupts(GLOBAL);
-   set_tris_a(0xFF);
+   set_tris_a(0x03);
    set_tris_b(0xF0);
    set_tris_d(0x00);   
-   
+   output_low(PIN_B0);
+   output_low(PIN_B1);
+   output_low(PIN_B2);
+   output_low(PIN_B3);
    lcd_init();
    
    banderaHidrogeno = 1;
@@ -115,44 +117,22 @@ void main(){
    delay_us(10);
    leerADC = read_adc();
    read_adc(ADC_START_ONLY);
+   
    saludoSerial();
    saludo();
+    
    while(1){
-       menu();
-       cambioDeEstado();
        conexionDHT();
        if(conexionOK()){  
           mostrarDHT();
           mostrarGases();
-
-       }
-       if(banderaHidrogeno == 1 && leerADC_ok == 1){
-           banderaHidrogeno = 0;
-           banderaButano = 1;
-           leerADC_ok = 0;
-           set_adc_channel(1);
-           delay_us(10);
-           read_adc(ADC_START_ONLY);
-           ppmHidrogeno = leerADC;
-       }
-       if(banderaButano == 1 && leerADC_ok == 1){
-           banderaHidrogeno = 1;
-           banderaButano = 0;
-           leerADC_ok = 0;
-           set_adc_channel(0);
-           delay_us(10);
-           read_adc(ADC_START_ONLY);
-           ppmButano = leerADC;
-       }
-       if(refreshSerial >= initSerial){
+          menu();
+          alarmas();
+          cambioDeEstado();
+       } 
+        if(refreshSerial > initSerial){
             menuSerial();
             refreshSerial= 0;
-        }
-        if(refreshLCD >= initLCD){
-            if(contadorAdelante = 0){
-                menuDatos();
-            }
-        refreshLCD = 0;
         }
    }    
 } 
@@ -163,13 +143,17 @@ void cambioDeEstado(){
         switch(banderaMenu){
             case 1:
                 printf(lcd_putc,"\f");
-                apuntador--;
-                if(apuntador <= 1){
+                if(apuntador > 1){
+                    apuntador--;
+                }
+                else{
                     apuntador = 1;
                 }
                 if(contadorAdelante == 1){
-                    apuntadorMenuConf--;
-                    if(apuntadorMenuConf <= 1){
+                    if(apuntadorMenuConf > 1){
+                        apuntadorMenuConf--;
+                    }
+                    else{
                         apuntadorMenuConf = 1;
                     }
                 }
@@ -194,8 +178,11 @@ void cambioDeEstado(){
                     }
                 }
                 if(contadorAdelante == 2 && apuntadorMenuConf == 3){
-                    apuntadorMenuAlarmas--;
-                    if(apuntadorMenuAlarmas <= 1){
+                    if(apuntadorMenuAlarmas > 1){
+                        apuntadorMenuAlarmas--;
+                        
+                    }
+                    else{
                         apuntadorMenuAlarmas = 1;
                     }
                 }
@@ -239,13 +226,20 @@ void cambioDeEstado(){
             
             case 2:
                 printf(lcd_putc,"\f");
-                apuntador++;
-                if(apuntador >= 4){
+                if(apuntador < 4){
+                    apuntador++;
+                    
+                }
+                else{
                     apuntador = 4;
                 }
                 if(contadorAdelante == 1){
-                    apuntadorMenuConf++;
-                    if(apuntadorMenuConf >= 3){
+                    
+                    if(apuntadorMenuConf < 3){
+                        apuntadorMenuConf++;
+                        
+                    }
+                    else{
                         apuntadorMenuConf = 3;
                     }
                 }
@@ -369,12 +363,12 @@ void cambioDeEstado(){
             
             case 4:
                 printf(lcd_putc,"\f");
-                if(contadorAdelante <= 0){
-                    menuDatos();
+                aux = 0;
+                if(contadorAdelante > 0){
+                    contadorAdelante--;
                 }
                 else{
-                    contadorAdelante--;
-                    aux = 0;
+                    menuDatos();
                 }
                 break;
         }
@@ -400,7 +394,7 @@ void saludo(){
 }
 
 void menuDatos(){
-    printf(lcd_putc, "\f");
+    printf(lcd_putc,"\f");
     switch(apuntador){
             case 1:
                 lcd_gotoxy(1,1);
@@ -418,15 +412,16 @@ void menuDatos(){
                 lcd_gotoxy(1,1);
                 printf(lcd_putc,"Humedad: %lu", humedad);
                 lcd_gotoxy(1,2);
-                printf(lcd_putc, "->Hidrogeno: %lu", ppmHidrogeno);
+                printf(lcd_putc, "->Hidrog: %lu", ppmHidrogeno);
             break;
             case 4:
                 lcd_gotoxy(1,1);
-                printf(lcd_putc,"Hidrogeno: %lu", ppmHidrogeno);
+                printf(lcd_putc,"Hidrog: %lu", ppmHidrogeno);
                 lcd_gotoxy(1,2);
                 printf(lcd_putc, "->Butano: %lu", ppmButano);
             break;
         }
+    
 }
 
 void menu(){
@@ -548,28 +543,28 @@ void configuracionTemperatura(){
     lcd_gotoxy(1,1);
     printf(lcd_putc, "Alarma Temperatura");
     lcd_gotoxy(3,2);
-    printf(lcd_putc, "Tiempo %li", aux);
+    printf(lcd_putc, "°C %li", aux);
 }
 
 void configuracionHumedad(){
     lcd_gotoxy(1,1);
     printf(lcd_putc, "Alarma Humedad");
     lcd_gotoxy(3,2);
-    printf(lcd_putc, "Tiempo %li", aux);
+    printf(lcd_putc, "HR %li", aux);
 }
 
 void configuracionHidrogeno(){
     lcd_gotoxy(1,1);
     printf(lcd_putc, "Alarma Hidrog.");
     lcd_gotoxy(3,2);
-    printf(lcd_putc, "Tiempo %li", aux);
+    printf(lcd_putc, "ppm %li", aux);
 }
 
 void configuracionButano(){
     lcd_gotoxy(1,1);
     printf(lcd_putc, "Alarma Butano");
     lcd_gotoxy(3,2);
-    printf(lcd_putc, "Tiempo %li", aux);
+    printf(lcd_putc, "ppm %li", aux);
 }
 
 void conexionDHT(){
@@ -630,7 +625,6 @@ void mostrarDHT(){
    if(checksum == (enteroRH + decimalRH + enteroTemperatura + decimalTemperatura)){
       temperatura = enteroTemperatura + decimalTemperatura;
       humedad = enteroRH + decimalRH;
-      alarmas();
    }
 }
 
@@ -680,7 +674,6 @@ void mostrarGases(){
       read_adc(ADC_START_ONLY);
       ppmButano = leerADC;
    }
-   alarmas();
 }
 
 void saludoSerial(){
@@ -688,7 +681,7 @@ void saludoSerial(){
     printf("--------------------------------\r\r");
     printf("            Iniciando           \r");    
     for(int i = 0; i < 4; i++){
-        printf("               ...              \r");
+        printf("             ...              \r");
         delay_ms(1000);
     }
     printf("\r\r");
